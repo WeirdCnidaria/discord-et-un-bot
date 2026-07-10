@@ -1,4 +1,5 @@
 from random import shuffle
+import pickle
 
 class Card():
     def __init__(self, suit: str, rank: str):
@@ -24,6 +25,8 @@ class Deck():
         self.played_deck = list()
         # The used up cards, waiting to be shuffled back into the deck
         self.discarded_deck = list()
+        # Extra deck used during splitting
+        self.split_deck = list()
 
         for _ in range(deck_amount):
             for suit in ["diamonds", "clubs", "hearts", "spades"]:
@@ -93,3 +96,38 @@ class Deck():
                     break
                 current_option = sum_option
             return current_option
+
+class Decks():
+    def __init__(self, load_saved=True, saved_dir="temp/saved_decks.pickle", print_debug_info=True):
+        self.decks = dict()
+        self.dir = saved_dir
+        self.print_debug = print_debug_info
+        if load_saved:
+            self.load()
+    def load_deck(self, channel_id):
+        if channel_id not in self.decks:
+            self.decks[channel_id] = Deck()
+        return self.decks[channel_id]
+    def save_deck(self, channel_id, deck):
+        self.decks[channel_id] = deck
+    def clear_hand(self, channel_id):
+        self.load_deck(channel_id)
+        self.decks[channel_id].clear_hand()
+        self.save()
+    def draw(self, channel_id):
+        self.load_deck(channel_id)
+        self.decks[channel_id].draw()
+    def reshuffle(self, channel_id):
+        self.load_deck(channel_id)
+        self.decks[channel_id].reshuffle()
+    def load(self):
+        try:
+            with open(self.dir, "rb") as f:
+                self.decks = pickle.load(f)
+        except FileNotFoundError:
+            self.decks = dict()
+            if self.print_debug:
+                print("[deck.py] No saved decks detected, creating empty deck list")
+    def save(self):
+        with open(self.dir, "wb") as f:
+            pickle.dump(self.decks, f)
