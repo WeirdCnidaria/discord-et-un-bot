@@ -43,15 +43,29 @@ class Deck():
         new_card = self.table_deck[0]
         self.table_deck.pop(0)
         self.played_deck.append(new_card)
+    def draw_split(self):
+        new_card = self.table_deck[0]
+        self.table_deck.pop(0)
+        self.split_deck.append(new_card)
     def clear_hand(self):
         self.discarded_deck += self.played_deck
+        self.discarded_deck += self.split_deck
         self.played_deck = list()
+        self.split_deck = list()
     def shuffle(self):
         shuffle(self.table_deck)
     def reshuffle(self):
         self.table_deck += self.discarded_deck
         self.discarded_deck = list()
         self.shuffle()
+    def split(self):
+        if len(self.played_deck) != 2:
+            raise Exception("You can only split with 2 cards on hand")
+        if self.played_deck[0].rank != self.played_deck[1].rank:
+            raise Exception("You can only split with a double")
+        split_card = self.played_deck[1]
+        self.played_deck.pop(1)
+        self.split_deck.append(split_card)
     def print(self):
         print("Table deck:\n")
         for card in self.table_deck:
@@ -63,8 +77,8 @@ class Deck():
         for card in self.discarded_deck:
             print(f"{card.rank.capitalize()} of {card.suit}")
     def is_crit(self):
-        return (self.table_deck[0].rank == "ace" and self.table_deck[1].rank in ["10", "jack", "queen", "king"]) or \
-               (self.table_deck[1].rank == "ace" and self.table_deck[0].rank in ["10", "jack", "queen", "king"])
+        return (self.played_deck[0].rank == "ace" and self.played_deck[1].rank in ["10", "jack", "queen", "king"]) or \
+               (self.played_deck[1].rank == "ace" and self.played_deck[0].rank in ["10", "jack", "queen", "king"])
     def hand_string(self):
         if len(played_deck) == 0:
             return "The hand is empty"
@@ -78,6 +92,29 @@ class Deck():
         non_ace_sum = 0
         
         for card in self.played_deck:
+            if card.rank == "ace":
+                ace_amount += 1
+            else:
+                non_ace_sum += card.value()
+        
+        if ace_amount == 0:
+            return non_ace_sum
+        else:
+            sum_options = list()
+            for i in range(ace_amount+1):
+                sum_options.append(non_ace_sum + 11*i + 1*(ace_amount-i))
+            current_option = sum_options[0]
+            sum_options.pop(0)
+            for sum_option in sum_options:
+                if sum_option > cap:
+                    break
+                current_option = sum_option
+            return current_option
+    def evaluate_split(self, cap: int):
+        ace_amount = 0
+        non_ace_sum = 0
+        
+        for card in self.split_deck:
             if card.rank == "ace":
                 ace_amount += 1
             else:
@@ -117,6 +154,12 @@ class Decks():
     def draw(self, channel_id):
         self.load_deck(channel_id)
         self.decks[channel_id].draw()
+    def draw_split(self, channel_id):
+        self.load_deck(channel_id)
+        self.decks[channel_id].draw_split()
+    def split(self, channel_id):
+        self.load_deck(channel_id)
+        self.decks[channel_id].split()
     def reshuffle(self, channel_id):
         self.load_deck(channel_id)
         self.decks[channel_id].reshuffle()

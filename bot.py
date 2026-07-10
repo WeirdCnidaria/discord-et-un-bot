@@ -23,14 +23,15 @@ tree = discord.app_commands.CommandTree(client)
 @discord.app_commands.describe(amount = "How many standard 52 card decks should be used")
 async def new_deck(interaction, amount: int):
     global decks
+    error_string = str()
     if amount < 1:
         amount = 1
-        await interaction.response.send_message("Invalid amount. Using 1 deck instead")
+        error_string = "Invalid amount. Using 1 deck instead\n"
     decks.save_deck(interaction.channel_id, Deck(deck_amount=amount))
     if amount == 1:
-        await interaction.response.send_message(f"Deck reset. Starting with 1 deck of cards")
+        await interaction.response.send_message(error_string + f"Deck reset. Starting with 1 deck of cards")
     else:
-        await interaction.response.send_message(f"Deck reset. Starting with {amount} decks of cards")
+        await interaction.response.send_message(error_string + f"Deck reset. Starting with {amount} decks of cards")
 
 @tree.command(
     name = "deck_info",
@@ -46,10 +47,13 @@ class HandView(discord.ui.View):
     def __init__(self, cap, channel_id):
         super().__init__(timeout=None)
         self.hand_image = None
-        self.score_string = str()
         self.reshuffled = False
         self.forced = False
+        self.forced_split = False
+        self.hand_split = False
+        self.split_turn = True
         self.finished = False
+        self.finished_split = False
         self.cap = cap
         self.channel_id = channel_id
     def make_embed(self):
@@ -66,17 +70,56 @@ class HandView(discord.ui.View):
             self.hand_image = hand_image
             embed.set_image(url="attachment://hand.png")
             score = decks.load_deck(self.channel_id).evaluate(self.cap)
-            self.score_string = str(score)
-            if score >= self.cap:
-                self.finished = True
-                if score > self.cap:
-                    self.score_string = "BURST"
-                self.disable_buttons()
-                decks.clear_hand(self.channel_id)
-            if self.forced and score <= self.cap and self.finished:
-                embed.add_field(name=f"Score: {score + 2} ({score} + 2) ------ Cap: {self.cap}", value="")
+            score_string = str(score)
+            if not self.hand_split:
+                if score >= self.cap or self.finished:
+                    self.finished = True
+                    if score > self.cap:
+                        score_string = "BURST"
+                    self.disable_buttons()
+                    decks.clear_hand(self.channel_id)
+                if self.forced and score <= self.cap and self.finished:
+                    embed.add_field(name=f"Score: {score + 2} ({score} + 2) ------ Cap: {self.cap}", value="")
+                else:
+                    embed.add_field(name=f"Score: {score_string} ------ Cap: {self.cap}", value="")
             else:
-                embed.add_field(name=f"Score: {self.score_string} ------ Cap: {self.cap}", value="")
+                split_score = decks.load_deck(self.channel_id).evaluate_split(self.cap)
+                split_score_string = str(split_score)
+                if self.split_turn:
+                    self.split_turn = False
+                else:
+                    self.split_turn = True
+                if self.finished:
+                    self.split_turn = True
+                if self.finished_split:
+                    self.split_turn = False
+                if score >= self.cap:
+                    self.finished = True
+                    if score > self.cap:
+                        score_string = "BURST"
+                if split_score >= self.cap:
+                    self.finished_split = True
+                    if split_score > self.cap:
+                        split_score_string = "BURST"
+                main_deck_selection = str()
+                split_deck_selection = str()
+                if self.split_turn:
+                    split_deck_selection = " (CURRENTLY PLAYING)"
+                else:
+                    main_deck_selection = " (CURRENTLY PLAYING)"
+                if self.finished and self.finished_split:
+                    self.disable_buttons()
+                    decks.clear_hand(self.channel_id)
+                    main_deck_selection = str()
+                    split_deck_selection = str()
+                if self.forced and score <= self.cap and self.finished:
+                    embed.add_field(name=f"Score 1: {score + 2} ({score} + 2) - Cap: {self.cap}", value="\n")
+                else:
+                    embed.add_field(name=f"Score 1{main_deck_selection}: {score_string} - Cap: {self.cap}", value="\n")
+                if self.forced_split and split_score <= self.cap and self.finished_split:
+                    embed.add_field(name=f"Score 2: {split_score + 2} ({split_score} + 2) - Cap: {self.cap}", value="")
+                else:
+                    embed.add_field(name=f"Score 2{split_deck_selection}: {split_score_string} - Cap: {self.cap}", value="")
         return embed
     def disable_buttons(self):
         for item in self.children:
@@ -84,23 +127,59 @@ class HandView(discord.ui.View):
     
     @discord.ui.button(label="Draw")
     async def draw(self, interaction, button):
-        decks.draw(interaction.channel_id)
-        if len(deck.table_deck) == 0:
+        self.split.disabled = True
+        if not self.hand_split:
+            decks.draw(interaction.channel_id)
+        else:
+            if self.split_turn:
+                decks.draw_split(interaction.channel_id)
+            else:
+                decks.draw(interaction.channel_id)
+        if len(decks.load_deck(interaction.channel_id).table_deck) == 0:
             self.reshuffled = True
             decks.reshuffle(channel_id)
         await interaction.response.edit_message(embed=self.make_embed(), attachments=[self.hand_image], view=self)
     @discord.ui.button(label="Pass")
     async def pass_test(self, interaction, button):
-        self.finished = True
-        self.disable_buttons()
+        if not self.hand_split:
+            self.finished = True
+        else:
+            if self.split_turn:
+                self.finished_split = True
+            else:
+                self.finished = True
         await interaction.response.edit_message(embed=self.make_embed(), attachments=[self.hand_image], view=self)
-        decks.clear_hand(interaction.channel_id)
     @discord.ui.button(label="Force")
     async def force(self, interaction, button):
+        self.split.disabled = True
+        if not self.hand_split:
+            button.disabled = True
+            self.forced = True
+            for _ in range(2):
+                decks.draw(interaction.channel_id)
+        else:
+            if self.split_turn:
+                if self.forced:
+                    button.disabled = True
+                else:
+                    button.disabled = False
+                self.forced_split = True
+                for _ in range(2):
+                    decks.draw_split(interaction.channel_id)
+            else:
+                if self.forced_split:
+                    button.disabled = True
+                else:
+                    button.disabled = False
+                self.forced = True
+                for _ in range(2):
+                    decks.draw(interaction.channel_id)
+        await interaction.response.edit_message(embed=self.make_embed(), attachments=[self.hand_image], view=self)
+    @discord.ui.button(label="Split")
+    async def split(self, interaction, button):
         button.disabled = True
-        self.forced = True
-        for _ in range(2):
-            decks.draw(interaction.channel_id)
+        self.hand_split = True
+        decks.split(interaction.channel_id)
         await interaction.response.edit_message(embed=self.make_embed(), attachments=[self.hand_image], view=self)
 
 @tree.command(
@@ -115,6 +194,8 @@ async def test(interaction, cap: int):
         global decks
         decks.clear_hand(interaction.channel_id)
         for _ in range(2):
+            if len(decks.load_deck(interaction.channel_id).table_deck) == 0:
+                decks.reshuffle(interaction.channel_id)
             decks.draw(interaction.channel_id)
         embed = discord.Embed(title=f"Et-un ability test ------ {len(decks.load_deck(interaction.channel_id).table_deck)} 🃏")
         buffer = create_hand_image(decks.load_deck(interaction.channel_id))
@@ -130,13 +211,16 @@ async def test(interaction, cap: int):
             view.finished = True
             view.disable_buttons()
         embed.add_field(name=f"Score: {score} ------ Cap: {cap}", value="")
+        if not decks.load_deck(interaction.channel_id).played_deck[0].rank == decks.load_deck(interaction.channel_id).played_deck[1].rank:
+            view.split.disabled = True
         await interaction.response.send_message(embed=embed, file=hand_image, view=view)
-        if score == "BURST":
+        if score == "BURST" or score == "CRIT" or score == cap:
             decks.clear_hand(interaction.channel_id)
 
 @client.event
 async def on_ready():
     await tree.sync()
+    await client.change_presence(activity=discord.Game(name="The game was rigged from the start"))
     print(f"Logged in as {client.user}")
 
 client.run(API_KEY)

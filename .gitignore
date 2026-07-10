@@ -3,3 +3,5 @@
 
 __pycache__
 temp/*
+!temp/.gitkeep
+saved_decks.pickle
