@@ -1,2 +1,4 @@
 # .env file containing the Discord API key
 .env
+
+__pycache__
