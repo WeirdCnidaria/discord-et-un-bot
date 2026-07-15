@@ -1,7 +1,10 @@
 # .env file containing the Discord API key
 .env
 
+# python cached libraries
 __pycache__
-temp/*
-!temp/.gitkeep
-saved_decks.pickle
+
+# contents of the folder with saved deck data
+save/*
+!save/.gitkeep
+
