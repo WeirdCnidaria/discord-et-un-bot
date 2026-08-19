@@ -55,7 +55,69 @@ async def deck_info(interaction):
     global decks
     deck = decks.load_deck(interaction.channel_id)
     total = len(deck.table_deck) + len(deck.played_deck) + len(deck.split_deck) + len(deck.discarded_deck) 
-    await interaction.response.send_message(f"The current deck has {len(deck.table_deck)} unplayed cards, {len(deck.played_deck) + len(deck.split_deck)} cards on hand, and {len(deck.discarded_deck)} discarded cards, for a total of {total} cards ({total // 52} • 52 cards)\nUse `/new_deck` to generate a new deck")
+    
+    # Add an information about extra cards, if they are present
+    remainder = total % 52 
+    remainder_string = str()
+    if remainder != 0:
+        remainder_string = f" + {remainder}"
+    
+    await interaction.response.send_message(f"The current deck has {len(deck.table_deck)} unplayed cards, {len(deck.played_deck) + len(deck.split_deck)} cards on hand, and {len(deck.discarded_deck)} discarded cards, for a total of {total} cards ({total // 52} • 52{remainder_string} cards)\nUse `/new_deck` to generate a new deck")
+
+@tree.command(
+    name = "ability_test",
+    description = "Do an ability test"
+)
+@discord.app_commands.describe(cap = "The max score before a burst. In classic blackjack it's 21")
+async def test(interaction, cap: int):
+    if cap < 1:
+        interaction.response.send_message(f"Invalid cap: {cap}, test aborted")
+    else:
+        global decks
+        
+        # Preventively clear the hand before proceeding
+        decks.clear_hand(interaction.channel_id)
+        
+        # Draw the initial 2 cards
+        for _ in range(2):
+            if len(decks.load_deck(interaction.channel_id).table_deck) == 0:
+                decks.reshuffle(interaction.channel_id)
+            decks.draw(interaction.channel_id)
+        
+        # Create the embed
+        embed = discord.Embed(title=embed_title(cap, len(decks.load_deck(interaction.channel_id).table_deck)))
+        
+        # Create the buttons
+        view = HandView(cap, interaction.channel_id)
+        
+        # Set up the image
+        buffer = create_hand_image(decks.load_deck(interaction.channel_id))
+        hand_image = discord.File(buffer, filename="hand.png")
+        embed.set_image(url="attachment://hand.png")
+        
+        # Check if the initial 2 cards ended the test
+        score = decks.load_deck(interaction.channel_id).evaluate(cap)
+        if score >= cap or decks.load_deck(interaction.channel_id).is_crit():
+            if score > cap:
+                score = "BURST"
+            if decks.load_deck(interaction.channel_id).is_crit():
+                score = "CRIT"
+            view.finished = True
+            view.disable_buttons()
+        
+        # Add score field
+        embed.add_field(name=f"Score: {score}", value="")
+        
+        # Disable split button if there is no double
+        if not decks.load_deck(interaction.channel_id).played_deck[0].rank == decks.load_deck(interaction.channel_id).played_deck[1].rank:
+            view.split.disabled = True
+        
+        # Send the embed into the channel
+        await interaction.response.send_message(embed=embed, file=hand_image, view=view)
+        
+        # Clear hand if the test had ended
+        if score == "BURST" or score == "CRIT" or score == cap:
+            decks.clear_hand(interaction.channel_id)
 
 # Buttons for the ability test embed
 class HandView(discord.ui.View):
@@ -169,13 +231,13 @@ class HandView(discord.ui.View):
                     split_deck_selection = str()
                 
                 # Add the first score field
-                if self.forced and score <= self.cap and self.finished:
+                if self.forced and self.finished:
                     embed.add_field(name=f"Score 1: {score + 2} ({score} + 2)", value="\n")
                 else:
                     embed.add_field(name=f"Score 1{main_deck_selection}: {score_string}", value="\n")
                 
                 # Add the second score field
-                if self.forced_split and split_score <= self.cap and self.finished_split:
+                if self.forced_split and self.finished_split:
                     embed.add_field(name=f"Score 2: {split_score + 2} ({split_score} + 2)", value="")
                 else:
                     embed.add_field(name=f"Score 2{split_deck_selection}: {split_score_string}", value="")
@@ -274,61 +336,6 @@ class HandView(discord.ui.View):
         decks.split(interaction.channel_id)
         
         await interaction.response.edit_message(embed=self.make_embed(), attachments=[self.hand_image], view=self)
-
-@tree.command(
-    name = "test",
-    description = "Do an ability test"
-)
-@discord.app_commands.describe(cap = "The max score before a burst. In classic blackjack it's 21")
-async def test(interaction, cap: int):
-    if cap < 2:
-        interaction.response.send_message(f"Invalid cap: {cap}, test aborted")
-    else:
-        global decks
-        
-        # Preventively clear the hand before proceeding
-        decks.clear_hand(interaction.channel_id)
-        
-        # Draw the initial 2 cards
-        for _ in range(2):
-            if len(decks.load_deck(interaction.channel_id).table_deck) == 0:
-                decks.reshuffle(interaction.channel_id)
-            decks.draw(interaction.channel_id)
-        
-        # Create the embed
-        embed = discord.Embed(title=embed_title(cap, len(decks.load_deck(interaction.channel_id).table_deck)))
-        
-        # Create the buttons
-        view = HandView(cap, interaction.channel_id)
-        
-        # Set up the image
-        buffer = create_hand_image(decks.load_deck(interaction.channel_id))
-        hand_image = discord.File(buffer, filename="hand.png")
-        embed.set_image(url="attachment://hand.png")
-        
-        # Check if the initial 2 cards ended the test
-        score = decks.load_deck(interaction.channel_id).evaluate(cap)
-        if score >= cap or decks.load_deck(interaction.channel_id).is_crit():
-            if score > cap:
-                score = "BURST"
-            if decks.load_deck(interaction.channel_id).is_crit():
-                score = "CRIT"
-            view.finished = True
-            view.disable_buttons()
-        
-        # Add score field
-        embed.add_field(name=f"Score: {score}", value="")
-        
-        # Disable split button if there is no double
-        if not decks.load_deck(interaction.channel_id).played_deck[0].rank == decks.load_deck(interaction.channel_id).played_deck[1].rank:
-            view.split.disabled = True
-        
-        # Send the embed into the channel
-        await interaction.response.send_message(embed=embed, file=hand_image, view=view)
-        
-        # Clear hand if the test had ended
-        if score == "BURST" or score == "CRIT" or score == cap:
-            decks.clear_hand(interaction.channel_id)
 
 @client.event
 async def on_ready():
